@@ -1,0 +1,50 @@
+stages:
+  - test
+
+variables:
+  # code-review-graph 需要完整历史来做 merge-base / 增量构建
+  GIT_DEPTH: 0
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # ---- Codex provider（OpenAI 兼容 /v1/chat/completions）----
+  # CODEX_API_KEY 与 CODEX_BASE_URL / LARK_WEBHOOK_URL 属于密钥，
+  # 请在 GitLab「Settings → CI/CD → Variables」里配置（建议 Masked），不要写在这里。
+  # 未提供 CODEX_BASE_URL 时，review.py 默认走 https://api.openai.com/v1。
+  CODEX_MODEL: "gpt-5-codex"
+  # auto=先试 /v1/responses 再退到 /v1/chat/completions；
+  # 确认你的 NEW API 只走其中一个时，可固定为 responses 或 chat，省一次失败请求。
+  CODEX_API_MODE: "auto"
+  CODEX_MAX_TOKENS: "8192"
+  CODEX_TIMEOUT: "600"
+
+cache:
+  key: "$CI_JOB_NAME"
+  paths:
+    - .cache/pip
+
+ai_review:
+  stage: test
+  image: python:3.11
+
+  tags:
+    - kbp_server_runner
+
+  # 审查是辅助流程，失败不阻塞流水线
+  allow_failure: true
+  interruptible: true
+
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+      when: never
+
+  before_script:
+    - python -V
+    # 保证 origin/<默认分支> 存在，ci_review.sh 需要它算 merge-base
+    - git fetch origin "$CI_DEFAULT_BRANCH" || true
+    - pip install --disable-pip-version-check -r .ci/requirements.txt
+
+  script:
+    - bash .ci/ci_review.sh
